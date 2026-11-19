@@ -11,12 +11,26 @@ type Topology = Parameters<typeof feature>[0]
 
 /**
  * A real Earth for the Universities page hero: a NASA Blue Marble satellite
- * photo (vendored as base64 in data/earth-texture.ts — no external URL at
- * runtime) painted onto the sphere with a canvas scanline renderer driven by
- * a D3 orthographic projection, so the map looks like a genuine photo of
- * Earth, not flat cartoon shapes. Country shapes (Natural Earth,
+ * photo (2048x1024, vendored as base64 in data/earth-texture.ts — no
+ * external URL at runtime) painted onto the sphere with a canvas renderer
+ * driven by a D3 orthographic projection, so the map looks like a genuine
+ * photo of Earth, not flat cartoon shapes. Country shapes (Natural Earth,
  * data/countries-110m.json) are still used for the rotation math and to
  * highlight the picked country over the photo.
+ *
+ * Sampling: the sphere is painted in small screen segments. For each
+ * segment the four corners are inverted through the projection to their
+ * true longitude/latitude, and the matching texture quad is drawn with an
+ * affine transform, so adjacent segments share exact corner points and the
+ * map joins seamlessly — no repeated land, no vertical streaks, no steps
+ * at segment boundaries. (A single fixed-size texture window per segment,
+ * or one centre-sampled rectangle per segment, both smear: the first
+ * repeats the same 72° slice three times over, the second steps at every
+ * segment edge because latitude changes across a segment, worst when the
+ * globe is tilted.) The photo is tiled twice horizontally in an offscreen
+ * canvas, so the ±180° seam needs no special-casing. The canvas backing
+ * store is sized from the displayed size x devicePixelRatio (capped), so
+ * coastlines stay sharp on retina screens.
  *
  * Sizing: at rest the globe is SMALL and fits INSIDE the blue hero (about
  * the hero's height, ~380px on desktop), sitting on the right so the text on
@@ -26,12 +40,12 @@ type Topology = Parameters<typeof feature>[0]
  * (pointer-events-none, -z-10) behind the hero text and filter chips.
  */
 
-const CANVAS = 640
-const ROW = 3
-const SEGMENTS = 5
+const SEGMENTS = 8
 const IDLE_SPIN_DEG_PER_SEC = 5
 const FLY_DURATION_MS = 1100
 const FRAME_MS = 33 // ~30fps cap for the canvas loop
+const MIN_CANVAS = 640
+const MAX_CANVAS = 1280
 
 /** Site country name -> name in the world-atlas TopoJSON. */
 const COUNTRY_NAME_MAP: Record<string, string> = {
@@ -59,43 +73,39 @@ function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
-/** Draw one source slice, splitting it at the texture's ±180° seam. */
-function drawWrapped(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
-  dx: number,
-  dy: number,
-  dw: number,
-  dh: number,
-  tw: number,
-) {
-  let x = ((sx % tw) + tw) % tw
-  let destX = dx
-  let remaining = sw
-  while (remaining > 0.001) {
-    const take = Math.min(remaining, tw - x)
-    ctx.drawImage(img, x, sy, take, sh, destX, dy, (dw * take) / sw, dh)
-    remaining -= take
-    destX += (dw * take) / sw
-    x = 0
-  }
-}
-
 export function CountryGlobe({ countryName }: { countryName: string | null }) {
   const features = useMemo(() => WORLD.features as Feature[], [])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const textureRef = useRef<HTMLImageElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  // Offscreen canvas holding the photo tiled twice side by side, so a
+  // segment straddling the ±180° seam just reads across the join.
+  const textureRef = useRef<HTMLCanvasElement | null>(null)
+
+  // Backing-store size: displayed size x scale x devicePixelRatio, capped.
+  // The container's offsetWidth is the layout width (unaffected by the CSS
+  // scale transform), so it stays 200/320/380px even at 2x.
+  const [canvasSize, setCanvasSize] = useState(768)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => {
+      const w = el.offsetWidth || 380
+      const scale = countryName ? 2 : 1
+      const dpr =
+        typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
+      const size = Math.round(
+        Math.min(MAX_CANVAS, Math.max(MIN_CANVAS, w * scale * dpr)),
+      )
+      setCanvasSize((prev) => (prev === size ? prev : size))
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [countryName])
 
   const [projection] = useState(() =>
-    geoOrthographic()
-      .scale(CANVAS / 2)
-      .translate([CANVAS / 2, CANVAS / 2])
-      .clipAngle(90)
-      .precision(0.3),
+    geoOrthographic().scale(320).translate([320, 320]).clipAngle(90).precision(0.3),
   )
 
   const rotationRef = useRef<[number, number]>([0, 0])
@@ -123,7 +133,15 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
   useEffect(() => {
     const img = new Image()
     img.onload = () => {
-      textureRef.current = img
+      const c = document.createElement('canvas')
+      c.width = img.naturalWidth * 2
+      c.height = img.naturalHeight
+      const g = c.getContext('2d')
+      if (g) {
+        g.drawImage(img, 0, 0)
+        g.drawImage(img, img.naturalWidth, 0)
+      }
+      textureRef.current = c
       drawFrameRef.current?.()
     }
     img.src = EARTH_TEXTURE_DATA_URL
@@ -138,24 +156,44 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
-    const R = CANVAS / 2
-    const C = CANVAS / 2
-    projection.rotate(rotationRef.current)
-    ctx.clearRect(0, 0, CANVAS, CANVAS)
+    const S = canvas.width
+    const R = S / 2
+    const C = S / 2
+    projection.scale(R).translate([C, C]).rotate(rotationRef.current)
+    ctx.clearRect(0, 0, S, S)
+
+    // Invert a screen point to [lon, lat], clamping it just inside the disc
+    // first: D3's orthographic invert returns NaN outside the limb.
+    const invertSafe = (x: number, y: number): [number, number] | null => {
+      let dx = x - C
+      let dy = y - C
+      const dist = Math.hypot(dx, dy)
+      const max = R - 0.5
+      if (dist > max) {
+        dx = (dx / dist) * max
+        dy = (dy / dist) * max
+      }
+      const inv = projection.invert?.([C + dx, C + dy])
+      if (!inv || !Number.isFinite(inv[0]) || !Number.isFinite(inv[1])) return null
+      return inv as [number, number]
+    }
 
     ctx.save()
     ctx.beginPath()
     ctx.arc(C, C, R - 0.5, 0, Math.PI * 2)
     ctx.clip()
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
 
     const tex = textureRef.current
     if (tex) {
-      const TW = tex.naturalWidth
-      const TH = tex.naturalHeight
-      const uHalf = TW / (2 * SEGMENTS)
-      const sh = (TH * ROW) / CANVAS * 1.35
-      for (let y = 0; y < CANVAS; y += ROW) {
-        const cy = y + ROW / 2
+      // Single-tile width; the offscreen canvas holds two tiles, and every
+      // lookup is shifted by one tile so it never runs off either edge.
+      const TW = tex.width / 2
+      const TH = tex.height
+      const row = S >= 1024 ? 4 : 3
+      for (let y = 0; y < S; y += row) {
+        const cy = y + row / 2
         const ny = (cy - C) / R
         if (Math.abs(ny) >= 1) continue
         const halfChord = Math.sqrt(1 - ny * ny) * R
@@ -163,13 +201,55 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
         const segW = (2 * halfChord) / SEGMENTS
         for (let k = 0; k < SEGMENTS; k++) {
           const sx0 = x0 + k * segW
-          const inv = projection.invert?.([sx0 + segW / 2, cy])
-          if (!inv) continue
-          const [lon, lat] = inv
-          const uC = ((lon + 180) / 360) * TW
-          const vC = ((90 - lat) / 180) * TH
-          const sy = Math.max(0, Math.min(TH - sh, vC - sh / 2))
-          drawWrapped(ctx, tex, uC - uHalf, sy, 2 * uHalf, sh, sx0, y, segW, ROW, TW)
+          const sx1 = sx0 + segW
+          const e = 0.5
+          // The segment's four corners, inverted to true lon/lat.
+          const cTL = invertSafe(sx0 + e, y + e)
+          const cTR = invertSafe(sx1 - e, y + e)
+          const cBL = invertSafe(sx0 + e, y + row - e)
+          const cBR = invertSafe(sx1 - e, y + row - e)
+          if (!cTL || !cTR || !cBL || !cBR) continue
+          const toUV = (ll: [number, number]): [number, number] => [
+            ((ll[0] + 180) / 360) * TW + TW,
+            ((90 - ll[1]) / 180) * TH,
+          ]
+          const [uTL, vTL] = toUV(cTL)
+          const [uTR, vTR] = toUV(cTR)
+          const [uBL, vBL] = toUV(cBL)
+          const [uBR, vBR] = toUV(cBR)
+          // Affine from the three TRUE corner correspondences:
+          // (uTL,vTL) -> TL, (uTR,vTR) -> TR, (uBL,vBL) -> BL. This is the
+          // key: unlike mapping the source rect's corners, it lets the
+          // sampled latitude vary linearly along the segment's top edge,
+          // which is what a tilted globe needs — a constant-v top edge
+          // stripes every row. The source rect drawn is the corners'
+          // bounding box; its image under the transform is a parallelogram
+          // hugging the dest quad, and neighbours paint over the small
+          // overlaps with equally first-order-correct content.
+          const du1 = uTR - uTL
+          const dv1 = vTR - vTL
+          const du2 = uBL - uTL
+          const dv2 = vBL - vTL
+          const det = du1 * dv2 - du2 * dv1
+          if (Math.abs(det) < 1e-6) continue
+          const dx1 = sx1 - sx0
+          const dy2 = row
+          const a = (dx1 * dv2) / det
+          const b = (-dy2 * dv1) / det
+          const cc = (-du2 * dx1) / det
+          const d = (du1 * dy2) / det
+          const ee = sx0 - a * uTL - cc * vTL
+          const ff = y - b * uTL - d * vTL
+          const su0 = Math.min(uTL, uTR, uBL, uBR)
+          const su1 = Math.max(uTL, uTR, uBL, uBR)
+          const sv0 = Math.min(vTL, vTR, vBL, vBR)
+          const sv1 = Math.max(vTL, vTR, vBL, vBR)
+          const suw = su1 - su0
+          const svh = sv1 - sv0
+          if (suw < 0.5 || svh < 0.5) continue
+          ctx.setTransform(a, b, cc, d, ee, ff)
+          ctx.drawImage(tex, su0, sv0, suw, svh, su0, sv0, suw, svh)
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
         }
       }
     } else {
@@ -178,7 +258,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
       g.addColorStop(0, '#2f6fb4')
       g.addColorStop(1, '#123a6b')
       ctx.fillStyle = g
-      ctx.fillRect(0, 0, CANVAS, CANVAS)
+      ctx.fillRect(0, 0, S, S)
     }
 
     // Selected country, lit up over the photo (same projection, so it lands
@@ -192,16 +272,36 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
       ctx.fillStyle = 'rgba(245, 158, 11, 0.42)'
       ctx.fill()
       ctx.strokeStyle = '#ffffff'
-      ctx.lineWidth = 2
+      ctx.lineWidth = Math.max(1.5, S / 320)
       ctx.shadowColor = 'rgba(245, 158, 11, 0.95)'
       ctx.shadowBlur = 16
       ctx.stroke()
       ctx.restore()
+    } else if (countryName && COUNTRY_FOCUS[countryName]) {
+      // Tiny countries (Singapore, Hong Kong, Macau) have no 110m shape:
+      // mark the spot with a glowing amber dot instead.
+      const [lon, lat] = COUNTRY_FOCUS[countryName]
+      const pt = projection([lon, lat]) as [number, number] | null
+      if (pt && Math.hypot(pt[0] - C, pt[1] - C) < R - 2) {
+        const r = Math.max(4, S / 90)
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(pt[0], pt[1], r, 0, Math.PI * 2)
+        ctx.fillStyle = '#f59e0b'
+        ctx.shadowColor = 'rgba(245, 158, 11, 0.95)'
+        ctx.shadowBlur = 18
+        ctx.fill()
+        ctx.shadowBlur = 0
+        ctx.lineWidth = Math.max(1.5, S / 400)
+        ctx.strokeStyle = '#ffffff'
+        ctx.stroke()
+        ctx.restore()
+      }
     }
 
     // Navy tint so white hero text stays readable over the photo.
     ctx.fillStyle = 'rgba(8, 26, 54, 0.20)'
-    ctx.fillRect(0, 0, CANVAS, CANVAS)
+    ctx.fillRect(0, 0, S, S)
 
     // Limb shading: darker towards the edge, like a real planet photo.
     const limb = ctx.createRadialGradient(C, C, R * 0.55, C, C, R)
@@ -209,7 +309,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
     limb.addColorStop(0.82, 'rgba(2, 8, 20, 0.10)')
     limb.addColorStop(1, 'rgba(2, 8, 20, 0.55)')
     ctx.fillStyle = limb
-    ctx.fillRect(0, 0, CANVAS, CANVAS)
+    ctx.fillRect(0, 0, S, S)
     ctx.restore()
 
     // Atmosphere rim.
@@ -314,6 +414,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
       className="pointer-events-none absolute top-1/2 left-[68%] -z-10 -translate-x-1/2 -translate-y-1/2"
     >
       <div
+        ref={containerRef}
         className="earth-globe aspect-square w-[200px] md:w-[320px] lg:w-[380px]"
         style={
           {
@@ -326,7 +427,12 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
         <span className="sr-only">
           {countryName ? `Globe showing ${countryName}` : 'Globe'}
         </span>
-        <canvas ref={canvasRef} width={CANVAS} height={CANVAS} className="block size-full" />
+        <canvas
+          ref={canvasRef}
+          width={canvasSize}
+          height={canvasSize}
+          className="block size-full"
+        />
       </div>
     </div>
   )
