@@ -206,6 +206,52 @@
   70%, 100% { opacity: 0; transform: translate(230px, 107px) rotate(25deg); }
 }
 
+/* LIVE badge dot: blinks (opacity + scale) so the pill reads as live. */
+@keyframes live-dot-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.2; transform: scale(0.7); }
+}
+
+.live-dot-blink {
+  animation: live-dot-blink 1.2s ease-in-out infinite;
+}
+
+/* Universities page globe: wireframe spins slowly; on a country pick the
+   globe spins, flies forward and grows past the hero frame's bottom edge. */
+@keyframes globe-spin {
+  to { transform: rotate(360deg); }
+}
+
+.globe-wire {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: globe-spin 9s linear infinite;
+}
+
+@keyframes globe-fly {
+  0% { transform: translateY(0) scale(1) rotate(0deg); }
+  45% { transform: translateY(16px) scale(1.9) rotate(200deg); }
+  70% { transform: translateY(32px) scale(2.55) rotate(330deg); }
+  100% { transform: translateY(28px) scale(2.4) rotate(360deg); }
+}
+
+.globe-fly {
+  animation: globe-fly 0.9s cubic-bezier(0.22, 0.9, 0.32, 1.15) forwards;
+  will-change: transform;
+}
+
+@keyframes globe-settle {
+  from { transform: translateY(28px) scale(2.4) rotate(360deg); }
+  to { transform: translateY(0) scale(1) rotate(0deg); }
+}
+
+.globe-settle {
+  animation: globe-settle 0.55s ease-out forwards;
+  will-change: transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .hero-stars, .hero-meteor { animation: none; }
+  .hero-stars, .hero-meteor, .live-dot-blink, .globe-wire { animation: none; }
+  .globe-fly { animation: none; transform: translateY(28px) scale(2.4); }
+  .globe-settle { animation: none; transform: none; }
 }

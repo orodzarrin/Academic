@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { PageHeader } from '@/components/page-header'
+import { CountryGlobe } from '@/components/universities/country-globe'
 import {
   QS_2027,
   QS_CHECK_OK,
@@ -64,7 +65,8 @@ export default async function UniversitiesPage({
         </div>
       ) : null}
 
-      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+      <section className="relative mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <CountryGlobe countryName={activeCountry?.country ?? null} />
         <div className="rounded-xl border bg-card p-4">
           <p className="font-mono text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
             Filter by country
