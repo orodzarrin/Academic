@@ -47,7 +47,7 @@ export default async function AcademicPositionsPage() {
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {positions.map((job) => (
               <li key={job.id}>
-                <JobCard job={job} href={job.applyUrl} />
+                <JobCard job={job} />
               </li>
             ))}
           </ul>

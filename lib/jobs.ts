@@ -1,5 +1,7 @@
 import dataset from '@/data/jobs.json'
+import directPhdDataset from '@/data/phd-scholarships-direct.json'
 import { SAMPLE_JOBS } from './data/sample-jobs'
+import { getAcademicPositions } from './academic-positions'
 import { ACADEMIC_ROLES, ALL_ROLES, CITIES, CIVIL_SPECIALISMS, STATES, type Sector, type StateCode } from './taxonomy'
 import type { Job, JobFilters } from './types'
 
@@ -60,13 +62,38 @@ function withRealEmployer(job: Job): Job {
 
 const LIVE_JOBS: Job[] = FILE.jobs.filter(isOpen).map(withRealEmployer).sort(byNewest)
 
+/*
+ * PhD scholarships sourced directly from official university pages
+ * (data/phd-scholarships-direct.json) — each verified live on the
+ * university's own site, never from aggregators (no Jooble/LinkedIn/
+ * Indeed). Merged here so they appear in the PhD section, search and
+ * detail pages. The nightly ingest only rewrites data/jobs.json, so
+ * this file is never touched by it. Entries duplicating an existing
+ * listing (same title + university) are skipped.
+ */
+const DIRECT_FILE = directPhdDataset as unknown as JobsFile
+
+function titleKey(job: Job) {
+  return `${job.organisation}::${job.title}`.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+const DIRECT_PHDS: Job[] = DIRECT_FILE.jobs
+  .filter(isOpen)
+  .map(withRealEmployer)
+  .filter(
+    (job) =>
+      !LIVE_JOBS.some((live) => live.slug === job.slug || titleKey(live) === titleKey(job)),
+  )
+
+const ALL_LIVE_JOBS: Job[] = [...LIVE_JOBS, ...DIRECT_PHDS].sort(byNewest)
+
 export const IS_DEMO_DATA = LIVE_JOBS.length === 0 && DEMO_ENABLED
 export const DATA_UPDATED_AT = FILE.generatedAt
 export const HAS_LIVE_DATA = LIVE_JOBS.length > 0
 
 const JOBS: Job[] = IS_DEMO_DATA
   ? SAMPLE_JOBS.filter((job) => ACADEMIC_ROLES.some((role) => role.slug === job.roleSlug)).sort(byNewest)
-  : LIVE_JOBS
+  : ALL_LIVE_JOBS
 
 function matchesFilters(job: Job, filters: JobFilters) {
   if (filters.sector && job.sector !== filters.sector) return false
@@ -121,7 +148,9 @@ export async function getJobs(filters: JobFilters = {}): Promise<Job[]> {
 }
 
 export async function getJobBySlug(slug: string): Promise<Job | undefined> {
-  return JOBS.find((job) => job.slug === slug)
+  // Academic positions live in a separate dataset, but their detail pages
+  // are served by the same /jobs/[slug] route, so fall back to them here.
+  return JOBS.find((job) => job.slug === slug) ?? (await getAcademicPositions()).find((job) => job.slug === slug)
 }
 
 export async function getFeaturedJobs(limit = 6): Promise<Job[]> {
@@ -168,7 +197,8 @@ export async function getJobCounts() {
 export async function getAllJobSlugs(): Promise<
   { slug: string; postedAt: string; closingDate?: string }[]
 > {
-  return JOBS.map(({ slug, postedAt, closingDate }) => ({ slug, postedAt, closingDate }))
+  const positions = await getAcademicPositions()
+  return [...JOBS, ...positions].map(({ slug, postedAt, closingDate }) => ({ slug, postedAt, closingDate }))
 }
 
 /** Used to reject junk filter values instead of serving a soft-404. */

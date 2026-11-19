@@ -25,10 +25,11 @@ export function SectorBadge({ sector }: { sector: Job['sector'] }) {
 }
 
 /**
- * Card link defaults to the job's detail page on this site. Academic Position
- * cards pass the original posting URL instead — those roles live in a separate
- * dataset (data/academic-positions.json) with no detail page here, so the card
- * opens the source ad in a new tab.
+ * Card link defaults to the job's detail page on this site
+ * (/jobs/[slug]) — including Academic Position cards, whose roles live
+ * in a separate dataset (data/academic-positions.json) but resolve
+ * through the same detail route. A caller may still pass an external
+ * href to send the card straight off-site instead.
  */
 export function JobCard({ job, href }: { job: Job; href?: string }) {
   const attribution = job.source ? SOURCE_ATTRIBUTION[job.source] : undefined
