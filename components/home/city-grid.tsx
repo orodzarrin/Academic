@@ -9,7 +9,7 @@ export function CityGrid({ counts, headingLevel = 'h2' }: { counts: Record<strin
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <p className="font-mono text-xs font-medium tracking-wider text-accent uppercase">Browse by city</p>
         <Heading id="browse-cities" className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Structural engineering jobs across Australia
+          Structural engineering jobs across Australia and the world
         </Heading>
         <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {CITIES.map((city) => (
@@ -21,7 +21,7 @@ export function CityGrid({ counts, headingLevel = 'h2' }: { counts: Record<strin
                 <div className="blueprint-grid absolute inset-0 opacity-60" aria-hidden="true" />
                 <div className="relative flex items-start justify-between">
                   <div>
-                    <p className="font-mono text-xs tracking-wider text-accent uppercase">{city.state}</p>
+                    <p className="font-mono text-xs tracking-wider text-accent uppercase">{city.region}</p>
                     <h3 className="mt-1 text-xl font-semibold">{city.name}</h3>
                   </div>
                   <ArrowUpRight

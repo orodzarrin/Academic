@@ -2,7 +2,7 @@ import dataset from '@/data/jobs.json'
 import directPhdDataset from '@/data/phd-scholarships-direct.json'
 import { SAMPLE_JOBS } from './data/sample-jobs'
 import { getAcademicPositions } from './academic-positions'
-import { ACADEMIC_ROLES, ALL_ROLES, CITIES, CIVIL_SPECIALISMS, STATES, type Sector, type StateCode } from './taxonomy'
+import { ACADEMIC_ROLES, ALL_ROLES, CIVIL_SPECIALISMS, STATES, countrySlug, getWorldCity, inferCountryForCity, isKnownCountry as isKnownCountrySlug, isKnownWorldCity, type Sector, type StateCode } from './taxonomy'
 import type { Job, JobFilters } from './types'
 
 /*
@@ -110,6 +110,9 @@ function matchesFilters(job: Job, filters: JobFilters) {
     }
   }
 
+  // Country first, then city: city slugs repeat across countries
+  // (Cambridge is in both the UK and the US), so the pair disambiguates.
+  if (filters.country && countrySlug(job.country) !== filters.country) return false
   if (filters.city && job.city !== filters.city) return false
   if (filters.state && job.state !== filters.state) return false
   if (filters.visa && !job.visaSponsorship) return false
@@ -206,8 +209,12 @@ export function isKnownRole(slug?: string) {
   return !slug || ALL_ROLES.some((role) => role.slug === slug)
 }
 
+export function isKnownCountry(slug?: string) {
+  return isKnownCountrySlug(slug)
+}
+
 export function isKnownCity(slug?: string) {
-  return !slug || CITIES.some((city) => city.slug === slug)
+  return isKnownWorldCity(slug)
 }
 
 type RawSearchParams = Record<string, string | string[] | undefined>
@@ -220,12 +227,21 @@ export function parseFilters(params: RawSearchParams): JobFilters {
   const sector = get('sector')
   const state = get('state')
   const salary = Number(get('salary'))
+  const rawCountry = get('country')
+  const country = isKnownCountrySlug(rawCountry) ? rawCountry : undefined
+  const rawCity = get('city')
+  // A city that does not belong to the chosen country is kept, so the pair
+  // honestly matches nothing (0 jobs) instead of silently dropping the city
+  // and showing the whole country's listings.
+  const city = rawCity && getWorldCity(rawCity) ? rawCity : undefined
+  const resolvedCountry = country ?? inferCountryForCity(rawCity)
 
   return {
     q: get('q')?.slice(0, 100),
     sector: sector === 'academic' ? sector : undefined,
     role: get('role'),
-    city: get('city'),
+    country: resolvedCountry,
+    city,
     state: STATES.some((s) => s.code === state) ? (state as StateCode) : undefined,
     salaryMin: Number.isFinite(salary) && salary > 0 ? salary : undefined,
     visa: get('visa') === '1',

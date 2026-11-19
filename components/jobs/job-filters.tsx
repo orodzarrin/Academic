@@ -7,10 +7,12 @@ import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
 import {
   ACADEMIC_ROLES,
-  CITIES,
   CIVIL_SPECIALISMS,
+  COUNTRIES,
   SALARY_OPTIONS,
-  STATES,
+  WORLD_CITIES,
+  getWorldCities,
+  inferCountryForCity,
 } from '@/lib/taxonomy'
 import type { JobFilters as Filters } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -56,6 +58,14 @@ export function JobFilters({ action, filters, lockSector, lockCity, activeCount 
   const [open, setOpen] = useState(false)
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  // Country first, then city. A city arriving without a country (an old link)
+  // inherits its country when it belongs to exactly one.
+  const [country, setCountry] = useState(filters.country ?? inferCountryForCity(filters.city) ?? '')
+  // With no country chosen the city list is empty; but when a city is already
+  // active and its country is ambiguous (Cambridge: UK and US), keep the full
+  // world list so the active selection is not lost on submit.
+  const cities = country ? getWorldCities(country) : filters.city ? WORLD_CITIES : []
+  const cityDisabled = !country && !filters.city
 
   function navigate(form: HTMLFormElement) {
     const params = new URLSearchParams()
@@ -163,27 +173,40 @@ export function JobFilters({ action, filters, lockSector, lockCity, activeCount 
           <Fieldset legend="Location">
             <div className="flex flex-col gap-3">
               <div>
-                <label htmlFor="filter-city" className="mb-1.5 block text-sm">
-                  City
+                <label htmlFor="filter-country" className="mb-1.5 block text-sm">
+                  Country
                 </label>
-                <select id="filter-city" name="city" defaultValue={filters.city ?? ''} className={selectClass}>
-                  <option value="">All cities</option>
-                  {CITIES.map((city) => (
-                    <option key={city.slug} value={city.slug}>
-                      {city.name}
+                <select
+                  id="filter-country"
+                  name="country"
+                  value={country}
+                  onChange={(event) => setCountry(event.target.value)}
+                  className={selectClass}
+                >
+                  <option value="">All countries</option>
+                  {COUNTRIES.map((entry) => (
+                    <option key={entry.slug} value={entry.slug}>
+                      {entry.name}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
-                <label htmlFor="filter-state" className="mb-1.5 block text-sm">
-                  State
+                <label htmlFor="filter-city" className="mb-1.5 block text-sm">
+                  City
                 </label>
-                <select id="filter-state" name="state" defaultValue={filters.state ?? ''} className={selectClass}>
-                  <option value="">All states</option>
-                  {STATES.map((state) => (
-                    <option key={state.code} value={state.code}>
-                      {state.name}
+                <select
+                  id="filter-city"
+                  name="city"
+                  key={country}
+                  defaultValue={filters.city ?? ''}
+                  className={selectClass}
+                  disabled={cityDisabled}
+                >
+                  <option value="">{country || filters.city ? 'All cities' : 'Select a country first'}</option>
+                  {cities.map((city) => (
+                    <option key={`${city.country}-${city.slug}`} value={city.slug}>
+                      {city.name}
                     </option>
                   ))}
                 </select>

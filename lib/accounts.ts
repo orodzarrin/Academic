@@ -84,8 +84,8 @@ export function validateList(
   const city = CITIES.find((entry) => entry.slug === cityRaw)
   if (cityRaw && !city) errors.push('Choose a city from the list, or leave it blank.')
 
-  if (city && state && city.state !== state) {
-    errors.push(`${city.name} is in ${city.state}, not ${state}. Clear one of the two.`)
+  if (city && state && city.state && city.state !== state) {
+    errors.push(`${city.name} is in ${city.region}, not ${state}. Clear one of the two.`)
   }
 
   const salaryNumber = Number(data.minSalary)

@@ -68,6 +68,8 @@ export interface JobFilters {
   q?: string
   sector?: Sector
   role?: string
+  /** Country slug, e.g. "united-kingdom" — pick a country before a city. */
+  country?: string
   city?: string
   state?: StateCode
   salaryMin?: number

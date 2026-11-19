@@ -28,7 +28,7 @@ export async function generateMetadata({
   )
 
   return {
-    title: `PhD Scholarships in ${city.name}, ${city.state}`,
+    title: `PhD Scholarships in ${city.name}, ${city.region}`,
     description: `PhD scholarships in structural engineering in ${city.name}. ${city.description}`,
     alternates: { canonical: `/cities/${city.slug}` },
     robots: narrowed ? { index: false, follow: true } : { index: true, follow: true },
@@ -44,7 +44,7 @@ export default async function CityPage({ params, searchParams }: { params: Param
   return (
     <>
       <PageHeader
-        eyebrow={`${city.name}, ${city.state}`}
+        eyebrow={`${city.name}, ${city.region}`}
         title={`PhD scholarships in ${city.name}`}
         description={city.description}
         breadcrumbs={[

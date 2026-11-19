@@ -15,7 +15,7 @@ interface JobsListingProps {
 function countActive(filters: Filters, lockSector?: boolean, lockCity?: boolean) {
   return Object.entries(filters).filter(([key, value]) => {
     if (lockSector && key === 'sector') return false
-    if (lockCity && key === 'city') return false
+    if (lockCity && (key === 'city' || key === 'country')) return false
     return Boolean(value)
   }).length
 }

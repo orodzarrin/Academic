@@ -99,8 +99,8 @@ export const SAMPLE_JOBS: Job[] = seeds.map((seed, index) => {
     ...rest,
     id: String(index + 1),
     slug: `${slugify(seed.title)}-${slugify(seed.organisation)}-${index + 1}`,
-    state: city.state,
-    location: `${suburb ?? city.name}, ${city.state}`,
+    state: city.state ?? undefined,
+    location: `${suburb ?? city.name}, ${city.region}`,
     description: `${seed.organisation} is seeking an outstanding ${role.name.replace(/s$/, '')} to join ${
       seed.department ?? 'its structural engineering team'
     } in ${city.name}. ${seed.summary} This is an excellent opportunity to advance your career within Australia’s structural engineering ${
