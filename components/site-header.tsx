@@ -12,13 +12,14 @@ import { Logo } from '@/components/logo'
 import { cn } from '@/lib/utils'
 
 /*
- * The top nav is deliberately short: the three academic destinations only.
- * Find a supervisor and Universities stay reachable from the homepage hero
- * links, and Job alerts live on the industry site — not here.
+ * The top nav holds the five academic destinations, in section order,
+ * with Browse by City last.
  */
 const NAV_ITEMS = [
-  { href: '/academic-positions', label: 'Academic Position' },
-  { href: '/academic', label: 'PhD Position' },
+  { href: '/academic-positions', label: 'Academic Positions' },
+  { href: '/academic', label: 'PhD Scholarships' },
+  { href: '/universities', label: 'Universities Worldwide' },
+  { href: '/supervisors', label: 'Find a Supervisor' },
   { href: '/cities', label: 'Browse by City' },
 ]
 
@@ -74,7 +75,7 @@ export function SiteHeader() {
         <Logo />
 
         {/*
-         * Three nav links plus two account buttons fit on one line from 1280px
+         * Five nav links plus two account buttons fit on one line from 1280px
          * up, so the nav appears at xl and the hamburger covers everything
          * narrower. Everything is nowrap: a wrapped label is what made the
          * bar look ragged.

@@ -134,14 +134,15 @@
 }
 
 /*
- * Dark navy hero background with a subtle grid, like the original
- * SE Jobs Australia hero. CSS only — there is no bridge photo file in the
- * repo, so no image is referenced.
+ * Dark navy hero background: the bridge photo from the original
+ * SE Jobs Australia hero (public/images/hero-bridge.png) under a navy
+ * tint, with the subtle white grid on top.
  */
 .hero-grid {
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgb(6 24 52 / 0.25), rgb(6 24 52 / 0.55)),
+    linear-gradient(180deg, rgb(6 24 52 / 0.45), rgb(6 24 52 / 0.72)),
+    url('/images/hero-bridge.png') center 30% / cover no-repeat,
     linear-gradient(110deg, #0a2540 15%, #0b2a4a 65%, #0d3055);
 }
 
