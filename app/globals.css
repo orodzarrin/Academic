@@ -217,8 +217,9 @@
 }
 
 /* Universities page globe: a real Earth photo behind the hero text. At rest
-   it is small and fits inside the hero frame; picking a country doubles it
-   (--earth-scale: 2), lifts it up (--earth-lift) and shifts it right
+   it is small and fits inside the hero frame; picking a country zooms it in
+   (--earth-scale: 2x for large countries, up to 5x for small ones — see
+   country-globe.tsx), lifts it up (--earth-lift) and shifts it right
    (--earth-shift) so it rises out of the frame. The spin itself is the map
    rotating (canvas renderer), not a CSS rotation. */
 .earth-globe {

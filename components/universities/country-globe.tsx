@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { geoCentroid, geoOrthographic, geoPath } from 'd3-geo'
+import { geoBounds, geoCentroid, geoOrthographic, geoPath } from 'd3-geo'
 import { feature } from 'topojson-client'
 import type { Feature, FeatureCollection } from 'geojson'
 import topologyJson from '@/data/countries-110m.json'
@@ -38,11 +38,13 @@ type Topology = Parameters<typeof feature>[0]
  * smooth deep blue and the land is untouched.
  *
  * Motion: at rest the globe idly spins. When a country is picked it flies
- * so that country faces the viewer, rises up, and grows to DOUBLE its
- * resting size, with the country lit up amber over the photo — and it
- * keeps a SMALL gentle wobble around the picked country (a few degrees
- * either side, ~9s period), so it never freezes and never spins away from
- * the country. It stays a background layer (pointer-events-none, -z-10)
+ * so that country faces the viewer, rises up, and grows — how much depends
+ * on the country's size (a small country like Qatar zooms to 5x, a large
+ * one like Germany stays near 2x), with the country lit up amber over the
+ * photo — and it keeps a SMALL gentle wobble around the picked country (a
+ * few degrees either side, ~9s period, scaled to the country's size so a
+ * tiny country stays centred), so it never freezes and never spins away
+ * from the country. It stays a background layer (pointer-events-none, -z-10)
  * behind the hero text and filter chips.
  *
  * Sizing: at rest the globe is SMALL and fits INSIDE the blue hero (about
@@ -60,6 +62,29 @@ const MAX_CANVAS = 1280
 const WOBBLE_LAMBDA_DEG = 3
 const WOBBLE_PHI_DEG = 2
 const WOBBLE_PERIOD_MS = 9000
+// Size-aware zoom: every country used to get the same 2x, so a tiny country
+// like Qatar was just a dot. The zoom now depends on the country's angular
+// size (from its GeoJSON bounding box): zoom = 18 / extent, clamped to
+// 2x-5x. A country ~9 deg across (Germany) stays near 2x; anything smaller
+// zooms closer, up to 5x — close enough to see the country clearly, never
+// so far that the globe stops looking like a globe.
+const ZOOM_REF_DEG = 18
+const ZOOM_MIN = 2
+const ZOOM_MAX = 5
+// Marker countries (Singapore, Hong Kong, Macau) have no 110m shape; treat
+// them as a ~0.5 deg country so they get the closest zoom too.
+const MARKER_EXTENT_DEG = 0.5
+
+/** Angular size of a country in degrees: the larger side of its GeoJSON
+ * bounding box, with longitude squashed by cos(latitude). An antimeridian
+ * artefact (a negative longitude span) counts as 0 — the latitude span
+ * still sizes the country, and the zoom is clamped anyway. */
+function countryExtentDeg(f: Feature): number {
+  const [[loMin, laMin], [loMax, laMax]] = geoBounds(f)
+  const midLat = (((laMin + laMax) / 2) * Math.PI) / 180
+  const w = Math.max(0, loMax - loMin) * Math.cos(midLat)
+  return Math.max(w, laMax - laMin)
+}
 
 /** Site country name -> name in the world-atlas TopoJSON. */
 const COUNTRY_NAME_MAP: Record<string, string> = {
@@ -302,6 +327,43 @@ function initGL(
 
 export function CountryGlobe({ countryName }: { countryName: string | null }) {
   const features = useMemo(() => WORLD.features as Feature[], [])
+
+  const selected = useMemo(() => {
+    if (!countryName) return null
+    const topoName = COUNTRY_NAME_MAP[countryName] ?? countryName
+    return (
+      features.find(
+        (f) => (f.properties as { name?: string } | null)?.name === topoName,
+      ) ?? null
+    )
+  }, [countryName, features])
+
+  // Size-aware zoom for the picked country: small countries zoom closer.
+  const selectedExtentDeg = useMemo(() => {
+    if (selected) return countryExtentDeg(selected)
+    if (countryName && COUNTRY_FOCUS[countryName]) return MARKER_EXTENT_DEG
+    return null
+  }, [selected, countryName])
+
+  const zoom = selectedExtentDeg
+    ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, ZOOM_REF_DEG / selectedExtentDeg))
+    : 1
+
+  // Wobble amplitude scaled to the country's size: at 5x zoom a fixed 3 deg
+  // swing would shove a tiny country far off-centre, so small countries get
+  // a smaller swing (floored so the globe never looks frozen).
+  const wobbleRef = useRef({ lambda: WOBBLE_LAMBDA_DEG, phi: WOBBLE_PHI_DEG })
+  useEffect(() => {
+    if (!selectedExtentDeg) return
+    wobbleRef.current = {
+      lambda: Math.min(
+        WOBBLE_LAMBDA_DEG,
+        Math.max(0.8, selectedExtentDeg * 0.75),
+      ),
+      phi: Math.min(WOBBLE_PHI_DEG, Math.max(0.6, selectedExtentDeg * 0.5)),
+    }
+  }, [selectedExtentDeg])
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const overlayRef = useRef<HTMLCanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -311,14 +373,14 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
 
   // Backing-store size: displayed size x scale x devicePixelRatio, capped.
   // The container's offsetWidth is the layout width (unaffected by the CSS
-  // scale transform), so it stays 200/320/380px even at 2x.
+  // scale transform), so it stays 200/320/380px even at 5x.
   const [canvasSize, setCanvasSize] = useState(768)
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const update = () => {
       const w = el.offsetWidth || 380
-      const scale = countryName ? 2 : 1
+      const scale = zoom
       const dpr =
         typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
       const size = Math.round(
@@ -330,7 +392,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
     const ro = new ResizeObserver(update)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [countryName])
+  }, [zoom])
 
   const [projection] = useState(() =>
     geoOrthographic().scale(320).translate([320, 320]).clipAngle(90).precision(0.3),
@@ -347,16 +409,6 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
   const selectedNameRef = useRef<string | null>(countryName)
   const selectedRef = useRef<Feature | null>(null)
   const lastFrameRef = useRef(0)
-
-  const selected = useMemo(() => {
-    if (!countryName) return null
-    const topoName = COUNTRY_NAME_MAP[countryName] ?? countryName
-    return (
-      features.find(
-        (f) => (f.properties as { name?: string } | null)?.name === topoName,
-      ) ?? null
-    )
-  }, [countryName, features])
 
   // Load the vendored satellite texture once; draw as soon as it is ready.
   useEffect(() => {
@@ -543,11 +595,13 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
       } else if (selectedNameRef.current && targetRef.current) {
         // Gentle wobble around the picked country: a few degrees either
         // side, so the country stays centred and in view — the globe keeps
-        // a small movement but never spins away from the country.
+        // a small movement but never spins away from the country. The swing
+        // is scaled to the country's size, so a tiny country at 5x zoom
+        // does not drift off-centre.
         const w = (2 * Math.PI * now) / WOBBLE_PERIOD_MS
         rotationRef.current = [
-          targetRef.current[0] + WOBBLE_LAMBDA_DEG * Math.sin(w),
-          targetRef.current[1] + WOBBLE_PHI_DEG * Math.sin(w + 1.3),
+          targetRef.current[0] + wobbleRef.current.lambda * Math.sin(w),
+          targetRef.current[1] + wobbleRef.current.phi * Math.sin(w + 1.3),
         ]
       } else if (!selectedNameRef.current) {
         rotationRef.current = [
@@ -576,7 +630,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
         className="earth-globe relative aspect-square w-[200px] md:w-[320px] lg:w-[380px]"
         style={
           {
-            '--earth-scale': countryName ? 2 : 1,
+            '--earth-scale': zoom,
             '--earth-lift': countryName ? '-64px' : '0px',
             '--earth-shift': countryName ? '48px' : '0px',
           } as CSSProperties
