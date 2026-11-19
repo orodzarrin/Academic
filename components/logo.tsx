@@ -16,14 +16,6 @@ export function Logo({ className, inverted = false }: { className?: string; inve
         <span className={cn('text-base font-semibold tracking-tight', inverted ? 'text-white' : 'text-foreground')}>
           Academic <span className="text-accent">Opportunity</span>
         </span>
-        <span
-          className={cn(
-            'mt-1 font-mono text-[10px] tracking-wider uppercase',
-            inverted ? 'text-white/60' : 'text-muted-foreground',
-          )}
-        >
-          Live academic careers
-        </span>
       </span>
     </Link>
   )

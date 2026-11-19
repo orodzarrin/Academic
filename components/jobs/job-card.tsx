@@ -9,6 +9,7 @@ import {
   WORK_ARRANGEMENT_LABEL,
 } from '@/lib/format'
 import type { Job } from '@/lib/types'
+import { getUniversityUrl } from '@/lib/university-links'
 import { cn } from '@/lib/utils'
 
 export function SectorBadge({ sector }: { sector: Job['sector'] }) {
@@ -63,12 +64,27 @@ export function JobCard({ job, href }: { job: Job; href?: string }) {
         </Link>
       </h3>
 
-      {job.organisation && (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-muted-foreground">
-          <Building2 className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="truncate">{job.organisation}</span>
-        </p>
-      )}
+      {job.organisation &&
+        (() => {
+          const universityUrl = getUniversityUrl(job.organisation, job.applyUrl)
+          return (
+            <p className="mt-1.5 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Building2 className="size-3.5 shrink-0" aria-hidden="true" />
+              {universityUrl ? (
+                <a
+                  href={universityUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative z-10 truncate underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground"
+                >
+                  {job.organisation}
+                </a>
+              ) : (
+                <span className="truncate">{job.organisation}</span>
+              )}
+            </p>
+          )
+        })()}
 
       <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-muted-foreground">{job.summary}</p>
 

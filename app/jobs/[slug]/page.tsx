@@ -16,6 +16,7 @@ import {
 import { getAllJobSlugs, getJobBySlug, getRelatedJobs, IS_DEMO_DATA } from '@/lib/jobs'
 import { getCity, getRole } from '@/lib/taxonomy'
 import type { Job } from '@/lib/types'
+import { getUniversityUrl } from '@/lib/university-links'
 
 type Params = Promise<{ slug: string }>
 
@@ -137,13 +138,28 @@ export default async function JobPage({ params }: { params: Params }) {
           { label: job.title, href: `/jobs/${job.slug}` },
         ]}
       >
-        {job.organisation && (
-          <p className="mt-5 flex items-center gap-2 text-white/90">
-            <Building2 className="size-4" aria-hidden="true" />
-            {job.organisation}
-            {job.department && <span className="text-white/75">· {job.department}</span>}
-          </p>
-        )}
+        {job.organisation &&
+          (() => {
+            const universityUrl = getUniversityUrl(job.organisation, job.applyUrl)
+            return (
+              <p className="mt-5 flex items-center gap-2 text-white/90">
+                <Building2 className="size-4" aria-hidden="true" />
+                {universityUrl ? (
+                  <a
+                    href={universityUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline decoration-white/50 underline-offset-2 hover:text-white"
+                  >
+                    {job.organisation}
+                  </a>
+                ) : (
+                  job.organisation
+                )}
+                {job.department && <span className="text-white/75">· {job.department}</span>}
+              </p>
+            )
+          })()}
       </PageHeader>
 
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1fr_340px] lg:px-8">

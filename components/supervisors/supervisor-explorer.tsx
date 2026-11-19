@@ -24,6 +24,7 @@ import {
 } from '@/lib/academics'
 import type { CandidateProfile } from '@/lib/cv'
 import { followUpMailtoHref, mailtoHref } from '@/lib/supervisor-email'
+import { getUniversityUrl } from '@/lib/university-links'
 import { cn } from '@/lib/utils'
 
 const STORAGE_KEY = 'sjs.supervisors.emailed.v2'
@@ -474,7 +475,23 @@ export function SupervisorExplorer({
                   {group.universities.map((entry) => (
                     <div key={entry.university} className="mt-5">
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <h4 className="text-base font-semibold tracking-tight">{entry.university}</h4>
+                        <h4 className="text-base font-semibold tracking-tight">
+                          {(() => {
+                            const universityUrl = getUniversityUrl(entry.university)
+                            return universityUrl ? (
+                              <a
+                                href={universityUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline decoration-muted-foreground/50 underline-offset-2 hover:text-primary"
+                              >
+                                {entry.university}
+                              </a>
+                            ) : (
+                              entry.university
+                            )
+                          })()}
+                        </h4>
                         <p className="font-mono text-[11px] text-muted-foreground">
                           {entry.state} · {entry.people.length}
                         </p>
