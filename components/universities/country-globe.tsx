@@ -27,10 +27,18 @@ type Topology = Parameters<typeof feature>[0]
  * or one centre-sampled rectangle per segment, both smear: the first
  * repeats the same 72° slice three times over, the second steps at every
  * segment edge because latitude changes across a segment, worst when the
- * globe is tilted.) The photo is tiled twice horizontally in an offscreen
- * canvas, so the ±180° seam needs no special-casing. The canvas backing
- * store is sized from the displayed size x devicePixelRatio (capped), so
- * coastlines stay sharp on retina screens.
+ * globe is tilted.) The photo is tiled THREE times horizontally in an
+ * offscreen canvas, and every segment's corner longitudes are UNWRAPPED
+ * to be continuous before they are mapped to texture coordinates: invert()
+ * returns lon in [-180, 180], so a segment straddling the ±180° seam
+ * (the antimeridian) gets corners like +179 and -179, and without the
+ * unwrap toUV maps those to opposite ends of the texture — the affine
+ * then smears the whole world across the segment, which is the vertical
+ * streak band that appears whenever the seam is inside the visible disc
+ * (e.g. whenever the Americas are centred). With the unwrap the four
+ * corners are e.g. 179 and 181, the texture quad is tight, and the seam
+ * is invisible. The canvas backing store is sized from the displayed size
+ * x devicePixelRatio (capped), so coastlines stay sharp on retina screens.
  *
  * Sizing: at rest the globe is SMALL and fits INSIDE the blue hero (about
  * the hero's height, ~380px on desktop), sitting on the right so the text on
@@ -77,8 +85,8 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
   const features = useMemo(() => WORLD.features as Feature[], [])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
-  // Offscreen canvas holding the photo tiled twice side by side, so a
-  // segment straddling the ±180° seam just reads across the join.
+  // Offscreen canvas holding the photo tiled three times side by side, so
+  // an unwrapped longitude (which can run past ±180°) still reads on-canvas.
   const textureRef = useRef<HTMLCanvasElement | null>(null)
 
   // Backing-store size: displayed size x scale x devicePixelRatio, capped.
@@ -134,12 +142,13 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
     const img = new Image()
     img.onload = () => {
       const c = document.createElement('canvas')
-      c.width = img.naturalWidth * 2
+      c.width = img.naturalWidth * 3
       c.height = img.naturalHeight
       const g = c.getContext('2d')
       if (g) {
         g.drawImage(img, 0, 0)
         g.drawImage(img, img.naturalWidth, 0)
+        g.drawImage(img, img.naturalWidth * 2, 0)
       }
       textureRef.current = c
       drawFrameRef.current?.()
@@ -187,9 +196,9 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
 
     const tex = textureRef.current
     if (tex) {
-      // Single-tile width; the offscreen canvas holds two tiles, and every
+      // Single-tile width; the offscreen canvas holds three tiles, and every
       // lookup is shifted by one tile so it never runs off either edge.
-      const TW = tex.width / 2
+      const TW = tex.width / 3
       const TH = tex.height
       const row = S >= 1024 ? 4 : 3
       for (let y = 0; y < S; y += row) {
@@ -213,10 +222,29 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
             ((ll[0] + 180) / 360) * TW + TW,
             ((90 - ll[1]) / 180) * TH,
           ]
-          const [uTL, vTL] = toUV(cTL)
-          const [uTR, vTR] = toUV(cTR)
-          const [uBL, vBL] = toUV(cBL)
-          const [uBR, vBR] = toUV(cBR)
+          // Unwrap the corners' longitudes so they are continuous: invert()
+          // returns lon in [-180, 180], so across the ±180° seam the corners
+          // read like +179 and -179. Mapped raw, those land at opposite ends
+          // of the texture and the affine smears the whole world across the
+          // segment (the vertical streak band). Unwrapped they read 179 and
+          // 181, the texture quad is tight, and the seam disappears. The
+          // reference is the top-left corner normalised to [-180, 180); a
+          // segment's corners can span at most ~45° of longitude, so the
+          // ±180° window can never mis-unwrap a genuine span.
+          const normLon = (lon: number) => ((lon + 540) % 360) - 180
+          const refLon = normLon(cTL[0])
+          const unwrapLon = (lon: number) => {
+            let l = lon
+            while (l - refLon > 180) l -= 360
+            while (l - refLon < -180) l += 360
+            return l
+          }
+          const uv = (ll: [number, number]): [number, number] =>
+            toUV([unwrapLon(ll[0]), ll[1]])
+          const [uTL, vTL] = uv(cTL)
+          const [uTR, vTR] = uv(cTR)
+          const [uBL, vBL] = uv(cBL)
+          const [uBR, vBR] = uv(cBR)
           // Affine from the three TRUE corner correspondences:
           // (uTL,vTL) -> TL, (uTR,vTR) -> TR, (uBL,vBL) -> BL. This is the
           // key: unlike mapping the source rect's corners, it lets the
