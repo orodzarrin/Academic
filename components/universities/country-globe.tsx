@@ -12,48 +12,54 @@ type Topology = Parameters<typeof feature>[0]
 /**
  * A real Earth for the Universities page hero: a NASA Blue Marble satellite
  * photo (2048x1024, vendored as base64 in data/earth-texture.ts — no
- * external URL at runtime) painted onto the sphere with a canvas renderer
- * driven by a D3 orthographic projection, so the map looks like a genuine
- * photo of Earth, not flat cartoon shapes. Country shapes (Natural Earth,
- * data/countries-110m.json) are still used for the rotation math and to
- * highlight the picked country over the photo.
+ * external URL at runtime) painted onto a real 3D sphere with raw WebGL,
+ * so the map looks like a genuine photo of Earth, not flat cartoon shapes.
+ * Country shapes (Natural Earth, data/countries-110m.json) are still used
+ * for the rotation math and to highlight the picked country over the photo.
  *
- * Sampling: the sphere is painted in small screen segments. For each
- * segment the four corners are inverted through the projection to their
- * true longitude/latitude, and the matching texture quad is drawn with an
- * affine transform, so adjacent segments share exact corner points and the
- * map joins seamlessly — no repeated land, no vertical streaks, no steps
- * at segment boundaries. (A single fixed-size texture window per segment,
- * or one centre-sampled rectangle per segment, both smear: the first
- * repeats the same 72° slice three times over, the second steps at every
- * segment edge because latitude changes across a segment, worst when the
- * globe is tilted.) The photo is tiled THREE times horizontally in an
- * offscreen canvas, and every segment's corner longitudes are UNWRAPPED
- * to be continuous before they are mapped to texture coordinates: invert()
- * returns lon in [-180, 180], so a segment straddling the ±180° seam
- * (the antimeridian) gets corners like +179 and -179, and without the
- * unwrap toUV maps those to opposite ends of the texture — the affine
- * then smears the whole world across the segment, which is the vertical
- * streak band that appears whenever the seam is inside the visible disc
- * (e.g. whenever the Americas are centred). With the unwrap the four
- * corners are e.g. 179 and 181, the texture quad is tight, and the seam
- * is invisible. The canvas backing store is sized from the displayed size
- * x devicePixelRatio (capped), so coastlines stay sharp on retina screens.
+ * Why WebGL, not a 2D canvas: the photo was previously painted with a
+ * 2D-canvas scanline renderer (small screen segments, one affine texture
+ * sample each). That kept producing artifacts no patch could kill — a
+ * vertical streak band wherever the ±180° seam sat inside the disc, and at
+ * the 2x selected zoom the affine segments smeared and warped the land
+ * (Scandinavia stretched, vertical streaks in the oceans). A GPU sphere
+ * has none of that: every fragment samples the texture with bilinear
+ * filtering and mipmaps, the texture wraps around the seam, and the image
+ * stays exact at any zoom. Verified against a per-pixel reference render
+ * of the same texture (scripts in globe-verification/): the reference was
+ * clean where the scanline renderer smeared.
+ *
+ * Why the oceans are smooth: the source Blue Marble carries
+ * bathymetry / ocean-colour mottling that reads as blotches on the globe
+ * at every rotation, and the same per-pixel reference showed the identical
+ * blotches — so it was the texture, not the renderer. The vendored
+ * texture's ocean pixels were replaced with a heavily blurred version of
+ * themselves (see the note in data/earth-texture.ts); the seas are now a
+ * smooth deep blue and the land is untouched.
+ *
+ * Motion: at rest the globe idly spins. When a country is picked it flies
+ * so that country faces the viewer, rises up, and grows to DOUBLE its
+ * resting size, with the country lit up amber over the photo — and it
+ * keeps a SMALL gentle wobble around the picked country (a few degrees
+ * either side, ~9s period), so it never freezes and never spins away from
+ * the country. It stays a background layer (pointer-events-none, -z-10)
+ * behind the hero text and filter chips.
  *
  * Sizing: at rest the globe is SMALL and fits INSIDE the blue hero (about
- * the hero's height, ~380px on desktop), sitting on the right so the text on
- * the left stays clear. When a country chip is picked it spins so that
- * country faces the viewer, rises up, and grows to DOUBLE its resting size,
- * with the country lit up amber over the photo. It stays a background layer
- * (pointer-events-none, -z-10) behind the hero text and filter chips.
+ * the hero's height, ~380px on desktop), sitting on the right so the text
+ * on the left stays clear.
  */
 
-const SEGMENTS = 8
 const IDLE_SPIN_DEG_PER_SEC = 5
 const FLY_DURATION_MS = 1100
 const FRAME_MS = 33 // ~30fps cap for the canvas loop
 const MIN_CANVAS = 640
 const MAX_CANVAS = 1280
+// Gentle wobble around a picked country: small enough that the country
+// stays centred and in view, big enough that the globe never looks frozen.
+const WOBBLE_LAMBDA_DEG = 3
+const WOBBLE_PHI_DEG = 2
+const WOBBLE_PERIOD_MS = 9000
 
 /** Site country name -> name in the world-atlas TopoJSON. */
 const COUNTRY_NAME_MAP: Record<string, string> = {
@@ -81,13 +87,227 @@ function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
+// ---------------------------------------------------------------------------
+// Raw WebGL textured sphere. No new dependency: the sphere is a plain
+// lat/lon grid, the photo is one mipmapped texture, and the rotation is a
+// single 3x3 matrix uniform. The seam column of vertices is duplicated
+// (u = 0 and u = 1), so no triangle ever spans the antimeridian.
+// ---------------------------------------------------------------------------
+
+const SPHERE_LON_SEGS = 160
+const SPHERE_LAT_SEGS = 80
+
+function buildSphereGeometry() {
+  const cols = SPHERE_LON_SEGS + 1
+  const rows = SPHERE_LAT_SEGS + 1
+  const positions = new Float32Array(cols * rows * 3)
+  const uvs = new Float32Array(cols * rows * 2)
+  let p = 0
+  let q = 0
+  for (let i = 0; i < rows; i++) {
+    const lat = ((90 - (i * 180) / SPHERE_LAT_SEGS) * Math.PI) / 180
+    const cosLat = Math.cos(lat)
+    const sinLat = Math.sin(lat)
+    for (let j = 0; j < cols; j++) {
+      const lon = ((-180 + (j * 360) / SPHERE_LON_SEGS) * Math.PI) / 180
+      positions[p++] = cosLat * Math.sin(lon)
+      positions[p++] = sinLat
+      positions[p++] = cosLat * Math.cos(lon)
+      uvs[q++] = j / SPHERE_LON_SEGS
+      uvs[q++] = i / SPHERE_LAT_SEGS
+    }
+  }
+  const indices = new Uint16Array(SPHERE_LON_SEGS * SPHERE_LAT_SEGS * 6)
+  let k = 0
+  for (let i = 0; i < SPHERE_LAT_SEGS; i++) {
+    for (let j = 0; j < SPHERE_LON_SEGS; j++) {
+      const a = i * cols + j
+      const b = a + 1
+      const c = a + cols
+      const d = c + 1
+      indices[k++] = a
+      indices[k++] = c
+      indices[k++] = b
+      indices[k++] = b
+      indices[k++] = c
+      indices[k++] = d
+    }
+  }
+  return { positions, uvs, indices }
+}
+
+const VERT_SRC = `
+attribute vec3 aPos;
+attribute vec2 aUv;
+uniform mat3 uRot;
+varying vec2 vUv;
+varying float vNz;
+void main() {
+  vec3 p = uRot * aPos;
+  vUv = aUv;
+  vNz = p.z;
+  gl_Position = vec4(p.x, p.y, -p.z, 1.0);
+}
+`
+
+const FRAG_SRC = `
+precision mediump float;
+uniform sampler2D uTex;
+varying vec2 vUv;
+varying float vNz;
+void main() {
+  vec3 c = texture2D(uTex, vUv).rgb;
+  // Navy tint so white hero text stays readable over the photo.
+  c = c * 0.8 + vec3(8.0 / 255.0, 26.0 / 255.0, 54.0 / 255.0) * 0.2;
+  // Limb shading: darker towards the edge, like a real planet photo.
+  float d = clamp(vNz, 0.0, 1.0);
+  float r = sqrt(max(0.0, 1.0 - d * d));
+  float dark = r < 0.55 ? 0.0 : (r < 0.82 ? 0.10 * (r - 0.55) / 0.27 : 0.10 + 0.45 * (r - 0.82) / 0.18);
+  c *= 1.0 - dark;
+  gl_FragColor = vec4(c, 1.0);
+}
+`
+
+/**
+ * D3 rotation [lambda, phi] (degrees) -> 3x3 matrix, column-major, for
+ * v = Rx(-phi) * Ry(lambda) * s. This is the same rotation the D3
+ * orthographic projection applies, so the WebGL sphere and the 2D
+ * highlight overlay agree exactly.
+ */
+function rotationMatrix(lambdaDeg: number, phiDeg: number): Float32Array {
+  const lam = (lambdaDeg * Math.PI) / 180
+  const phi = (phiDeg * Math.PI) / 180
+  const cl = Math.cos(lam)
+  const sl = Math.sin(lam)
+  const cp = Math.cos(-phi)
+  const sp = Math.sin(-phi)
+  // M = Rx(-phi) * Ry(lambda); rows:
+  //   [cl, 0, sl]
+  //   [sp*sl, cp, -sp*cl]
+  //   [-cp*sl, sp, cp*cl]
+  return new Float32Array([
+    cl,
+    sp * sl,
+    -cp * sl,
+    0,
+    cp,
+    sp,
+    sl,
+    -sp * cl,
+    cp * cl,
+  ])
+}
+
+interface GlState {
+  gl: WebGLRenderingContext
+  program: WebGLProgram
+  uRot: WebGLUniformLocation | null
+  indexCount: number
+  texture: WebGLTexture | null
+  size: number
+}
+
+function createGlTexture(
+  gl: WebGLRenderingContext,
+  image: HTMLImageElement,
+): WebGLTexture | null {
+  const tex = gl.createTexture()
+  if (!tex) return null
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+  gl.generateMipmap(gl.TEXTURE_2D)
+  return tex
+}
+
+/** (Re)create the GL context, program, buffers and texture for a canvas. */
+function initGL(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement | null,
+): GlState | null {
+  const gl = (canvas.getContext('webgl2', {
+    alpha: true,
+    antialias: true,
+    depth: true,
+    premultipliedAlpha: false,
+  }) ??
+    canvas.getContext('webgl', {
+      alpha: true,
+      antialias: true,
+      depth: true,
+      premultipliedAlpha: false,
+    })) as WebGLRenderingContext | null
+  if (!gl) return null
+
+  const compile = (type: number, src: string) => {
+    const sh = gl.createShader(type)
+    if (!sh) return null
+    gl.shaderSource(sh, src)
+    gl.compileShader(sh)
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      gl.deleteShader(sh)
+      return null
+    }
+    return sh
+  }
+  const vs = compile(gl.VERTEX_SHADER, VERT_SRC)
+  const fs = compile(gl.FRAGMENT_SHADER, FRAG_SRC)
+  if (!vs || !fs) return null
+  const program = gl.createProgram()
+  if (!program) return null
+  gl.attachShader(program, vs)
+  gl.attachShader(program, fs)
+  gl.linkProgram(program)
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null
+
+  const geo = buildSphereGeometry()
+  const posBuf = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf)
+  gl.bufferData(gl.ARRAY_BUFFER, geo.positions, gl.STATIC_DRAW)
+  const uvBuf = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf)
+  gl.bufferData(gl.ARRAY_BUFFER, geo.uvs, gl.STATIC_DRAW)
+  const idxBuf = gl.createBuffer()
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf)
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geo.indices, gl.STATIC_DRAW)
+
+  gl.useProgram(program)
+  const aPos = gl.getAttribLocation(program, 'aPos')
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf)
+  gl.enableVertexAttribArray(aPos)
+  gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0)
+  const aUv = gl.getAttribLocation(program, 'aUv')
+  gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf)
+  gl.enableVertexAttribArray(aUv)
+  gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 0, 0)
+
+  const texture = image ? createGlTexture(gl, image) : null
+  gl.enable(gl.CULL_FACE)
+  gl.cullFace(gl.BACK)
+  gl.enable(gl.DEPTH_TEST)
+  gl.depthFunc(gl.LEQUAL)
+  return {
+    gl,
+    program,
+    uRot: gl.getUniformLocation(program, 'uRot'),
+    indexCount: geo.indices.length,
+    texture,
+    size: canvas.width,
+  }
+}
+
 export function CountryGlobe({ countryName }: { countryName: string | null }) {
   const features = useMemo(() => WORLD.features as Feature[], [])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const overlayRef = useRef<HTMLCanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
-  // Offscreen canvas holding the photo tiled three times side by side, so
-  // an unwrapped longitude (which can run past ±180°) still reads on-canvas.
-  const textureRef = useRef<HTMLCanvasElement | null>(null)
+  const imageRef = useRef<HTMLImageElement | null>(null)
+  const glStateRef = useRef<GlState | null>(null)
+  const glFailedRef = useRef(false)
 
   // Backing-store size: displayed size x scale x devicePixelRatio, capped.
   // The container's offsetWidth is the layout width (unaffected by the CSS
@@ -123,6 +343,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
     start: number
     duration: number
   } | null>(null)
+  const targetRef = useRef<[number, number] | null>(null)
   const selectedNameRef = useRef<string | null>(countryName)
   const selectedRef = useRef<Feature | null>(null)
   const lastFrameRef = useRef(0)
@@ -141,16 +362,9 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
   useEffect(() => {
     const img = new Image()
     img.onload = () => {
-      const c = document.createElement('canvas')
-      c.width = img.naturalWidth * 3
-      c.height = img.naturalHeight
-      const g = c.getContext('2d')
-      if (g) {
-        g.drawImage(img, 0, 0)
-        g.drawImage(img, img.naturalWidth, 0)
-        g.drawImage(img, img.naturalWidth * 2, 0)
-      }
-      textureRef.current = c
+      imageRef.current = img
+      glStateRef.current = null // re-init so the texture gets uploaded
+      glFailedRef.current = false
       drawFrameRef.current?.()
     }
     img.src = EARTH_TEXTURE_DATA_URL
@@ -163,134 +377,51 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
   // Paint one frame of the globe for the current rotation.
   const drawFrame = () => {
     const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx) return
+    const overlay = overlayRef.current
+    if (!canvas || !overlay) return
     const S = canvas.width
     const R = S / 2
     const C = S / 2
-    projection.scale(R).translate([C, C]).rotate(rotationRef.current)
-    ctx.clearRect(0, 0, S, S)
+    const [lam, phi] = rotationRef.current
 
-    // Invert a screen point to [lon, lat], clamping it just inside the disc
-    // first: D3's orthographic invert returns NaN outside the limb.
-    const invertSafe = (x: number, y: number): [number, number] | null => {
-      let dx = x - C
-      let dy = y - C
-      const dist = Math.hypot(dx, dy)
-      const max = R - 0.5
-      if (dist > max) {
-        dx = (dx / dist) * max
-        dy = (dy / dist) * max
+    // WebGL photo sphere. Resizing the canvas resets the GL context, so the
+    // state is rebuilt whenever the backing-store size changed.
+    if (!glFailedRef.current) {
+      if (!glStateRef.current || glStateRef.current.size !== S) {
+        glStateRef.current = initGL(canvas, imageRef.current)
+        if (!glStateRef.current) glFailedRef.current = true
       }
-      const inv = projection.invert?.([C + dx, C + dy])
-      if (!inv || !Number.isFinite(inv[0]) || !Number.isFinite(inv[1])) return null
-      return inv as [number, number]
+    }
+    const st = glStateRef.current
+    if (st?.texture) {
+      const gl = st.gl
+      gl.viewport(0, 0, S, S)
+      gl.clearColor(0, 0, 0, 0)
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+      gl.useProgram(st.program)
+      if (st.uRot) gl.uniformMatrix3fv(st.uRot, false, rotationMatrix(lam, phi))
+      gl.drawElements(gl.TRIANGLES, st.indexCount, gl.UNSIGNED_SHORT, 0)
     }
 
+    // 2D overlay: the picked-country highlight, the tiny-country marker and
+    // the atmosphere rim — drawn with the same D3 projection, so they land
+    // exactly on the photographed landmass. (If WebGL is unavailable the
+    // overlay also paints a plain ocean disc as a fallback.)
+    const ctx = overlay.getContext('2d')
+    if (!ctx) return
+    projection.scale(R).translate([C, C]).rotate(rotationRef.current)
+    ctx.clearRect(0, 0, S, S)
     ctx.save()
     ctx.beginPath()
     ctx.arc(C, C, R - 0.5, 0, Math.PI * 2)
     ctx.clip()
-    ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = 'high'
-
-    const tex = textureRef.current
-    if (tex) {
-      // Single-tile width; the offscreen canvas holds three tiles, and every
-      // lookup is shifted by one tile so it never runs off either edge.
-      const TW = tex.width / 3
-      const TH = tex.height
-      const row = S >= 1024 ? 4 : 3
-      for (let y = 0; y < S; y += row) {
-        const cy = y + row / 2
-        const ny = (cy - C) / R
-        if (Math.abs(ny) >= 1) continue
-        const halfChord = Math.sqrt(1 - ny * ny) * R
-        const x0 = C - halfChord
-        const segW = (2 * halfChord) / SEGMENTS
-        for (let k = 0; k < SEGMENTS; k++) {
-          const sx0 = x0 + k * segW
-          const sx1 = sx0 + segW
-          const e = 0.5
-          // The segment's four corners, inverted to true lon/lat.
-          const cTL = invertSafe(sx0 + e, y + e)
-          const cTR = invertSafe(sx1 - e, y + e)
-          const cBL = invertSafe(sx0 + e, y + row - e)
-          const cBR = invertSafe(sx1 - e, y + row - e)
-          if (!cTL || !cTR || !cBL || !cBR) continue
-          const toUV = (ll: [number, number]): [number, number] => [
-            ((ll[0] + 180) / 360) * TW + TW,
-            ((90 - ll[1]) / 180) * TH,
-          ]
-          // Unwrap the corners' longitudes so they are continuous: invert()
-          // returns lon in [-180, 180], so across the ±180° seam the corners
-          // read like +179 and -179. Mapped raw, those land at opposite ends
-          // of the texture and the affine smears the whole world across the
-          // segment (the vertical streak band). Unwrapped they read 179 and
-          // 181, the texture quad is tight, and the seam disappears. The
-          // reference is the top-left corner normalised to [-180, 180); a
-          // segment's corners can span at most ~45° of longitude, so the
-          // ±180° window can never mis-unwrap a genuine span.
-          const normLon = (lon: number) => ((lon + 540) % 360) - 180
-          const refLon = normLon(cTL[0])
-          const unwrapLon = (lon: number) => {
-            let l = lon
-            while (l - refLon > 180) l -= 360
-            while (l - refLon < -180) l += 360
-            return l
-          }
-          const uv = (ll: [number, number]): [number, number] =>
-            toUV([unwrapLon(ll[0]), ll[1]])
-          const [uTL, vTL] = uv(cTL)
-          const [uTR, vTR] = uv(cTR)
-          const [uBL, vBL] = uv(cBL)
-          const [uBR, vBR] = uv(cBR)
-          // Affine from the three TRUE corner correspondences:
-          // (uTL,vTL) -> TL, (uTR,vTR) -> TR, (uBL,vBL) -> BL. This is the
-          // key: unlike mapping the source rect's corners, it lets the
-          // sampled latitude vary linearly along the segment's top edge,
-          // which is what a tilted globe needs — a constant-v top edge
-          // stripes every row. The source rect drawn is the corners'
-          // bounding box; its image under the transform is a parallelogram
-          // hugging the dest quad, and neighbours paint over the small
-          // overlaps with equally first-order-correct content.
-          const du1 = uTR - uTL
-          const dv1 = vTR - vTL
-          const du2 = uBL - uTL
-          const dv2 = vBL - vTL
-          const det = du1 * dv2 - du2 * dv1
-          if (Math.abs(det) < 1e-6) continue
-          const dx1 = sx1 - sx0
-          const dy2 = row
-          const a = (dx1 * dv2) / det
-          const b = (-dy2 * dv1) / det
-          const cc = (-du2 * dx1) / det
-          const d = (du1 * dy2) / det
-          const ee = sx0 - a * uTL - cc * vTL
-          const ff = y - b * uTL - d * vTL
-          const su0 = Math.min(uTL, uTR, uBL, uBR)
-          const su1 = Math.max(uTL, uTR, uBL, uBR)
-          const sv0 = Math.min(vTL, vTR, vBL, vBR)
-          const sv1 = Math.max(vTL, vTR, vBL, vBR)
-          const suw = su1 - su0
-          const svh = sv1 - sv0
-          if (suw < 0.5 || svh < 0.5) continue
-          ctx.setTransform(a, b, cc, d, ee, ff)
-          ctx.drawImage(tex, su0, sv0, suw, svh, su0, sv0, suw, svh)
-          ctx.setTransform(1, 0, 0, 1, 0, 0)
-        }
-      }
-    } else {
-      // Fallback ocean until the texture loads (first paint only).
+    if (!st?.texture) {
       const g = ctx.createRadialGradient(C * 0.65, C * 0.6, R * 0.1, C, C, R)
       g.addColorStop(0, '#2f6fb4')
       g.addColorStop(1, '#123a6b')
       ctx.fillStyle = g
       ctx.fillRect(0, 0, S, S)
     }
-
-    // Selected country, lit up over the photo (same projection, so it lands
-    // exactly on the photographed landmass).
     const sel = selectedRef.current
     if (sel) {
       const path = geoPath(projection, ctx)
@@ -326,18 +457,6 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
         ctx.restore()
       }
     }
-
-    // Navy tint so white hero text stays readable over the photo.
-    ctx.fillStyle = 'rgba(8, 26, 54, 0.20)'
-    ctx.fillRect(0, 0, S, S)
-
-    // Limb shading: darker towards the edge, like a real planet photo.
-    const limb = ctx.createRadialGradient(C, C, R * 0.55, C, C, R)
-    limb.addColorStop(0, 'rgba(2, 8, 20, 0)')
-    limb.addColorStop(0.82, 'rgba(2, 8, 20, 0.10)')
-    limb.addColorStop(1, 'rgba(2, 8, 20, 0.55)')
-    ctx.fillStyle = limb
-    ctx.fillRect(0, 0, S, S)
     ctx.restore()
 
     // Atmosphere rim.
@@ -371,6 +490,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
       target = [-lon, -lat]
     }
     selectedNameRef.current = countryName
+    targetRef.current = target
     if (!target) {
       // Back to "All countries": stop flying, idle spin resumes from here.
       animRef.current = null
@@ -395,7 +515,8 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
     }
   }, [countryName, selected])
 
-  // One animation loop: idle spin at rest, eased fly to a picked country.
+  // One animation loop: idle spin at rest, eased fly to a picked country,
+  // then a gentle wobble around that country so it never freezes.
   // Capped at ~30fps so the canvas redraw stays cheap on phones.
   useEffect(() => {
     let raf = 0
@@ -419,6 +540,15 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
           anim.from[1] + (anim.to[1] - anim.from[1]) * e,
         ]
         if (t >= 1) animRef.current = null
+      } else if (selectedNameRef.current && targetRef.current) {
+        // Gentle wobble around the picked country: a few degrees either
+        // side, so the country stays centred and in view — the globe keeps
+        // a small movement but never spins away from the country.
+        const w = (2 * Math.PI * now) / WOBBLE_PERIOD_MS
+        rotationRef.current = [
+          targetRef.current[0] + WOBBLE_LAMBDA_DEG * Math.sin(w),
+          targetRef.current[1] + WOBBLE_PHI_DEG * Math.sin(w + 1.3),
+        ]
       } else if (!selectedNameRef.current) {
         rotationRef.current = [
           rotationRef.current[0] + (dt / 1000) * IDLE_SPIN_DEG_PER_SEC,
@@ -443,7 +573,7 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
     >
       <div
         ref={containerRef}
-        className="earth-globe aspect-square w-[200px] md:w-[320px] lg:w-[380px]"
+        className="earth-globe relative aspect-square w-[200px] md:w-[320px] lg:w-[380px]"
         style={
           {
             '--earth-scale': countryName ? 2 : 1,
@@ -459,7 +589,13 @@ export function CountryGlobe({ countryName }: { countryName: string | null }) {
           ref={canvasRef}
           width={canvasSize}
           height={canvasSize}
-          className="block size-full"
+          className="absolute inset-0 block size-full"
+        />
+        <canvas
+          ref={overlayRef}
+          width={canvasSize}
+          height={canvasSize}
+          className="absolute inset-0 block size-full"
         />
       </div>
     </div>
