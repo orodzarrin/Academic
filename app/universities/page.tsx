@@ -36,7 +36,7 @@ export default async function UniversitiesPage({
   const shown = activeCountry ? activeCountry.universities : UNIVERSITIES
 
   return (
-    <>
+    <div className="relative overflow-clip">
       <PageHeader
         eyebrow="Universities"
         title="Universities worldwide"
@@ -46,6 +46,7 @@ export default async function UniversitiesPage({
           { label: 'Supervisors', href: '/supervisors' },
           { label: 'Universities', href: '/universities' },
         ]}
+        background={<CountryGlobe countryName={activeCountry?.country ?? null} />}
       >
         <p className="mt-8 max-w-2xl text-sm text-white/70">
           QS {QS_EDITION} rank for the first {QS_2027.length} · {UNIVERSITIES.length} institutions in{' '}
@@ -66,7 +67,6 @@ export default async function UniversitiesPage({
       ) : null}
 
       <section className="relative mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <CountryGlobe countryName={activeCountry?.country ?? null} />
         <div className="rounded-xl border bg-card p-4">
           <p className="font-mono text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
             Filter by country
@@ -168,6 +168,6 @@ export default async function UniversitiesPage({
           and it goes into the next update.
         </p>
       </section>
-    </>
+    </div>
   )
 }

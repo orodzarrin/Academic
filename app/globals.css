@@ -216,42 +216,30 @@
   animation: live-dot-blink 1.2s ease-in-out infinite;
 }
 
-/* Universities page globe: wireframe spins slowly; on a country pick the
-   globe spins, flies forward and grows past the hero frame's bottom edge. */
-@keyframes globe-spin {
-  to { transform: rotate(360deg); }
-}
-
-.globe-wire {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: globe-spin 9s linear infinite;
-}
-
-@keyframes globe-fly {
-  0% { transform: translateY(0) scale(1) rotate(0deg); }
-  45% { transform: translateY(16px) scale(1.9) rotate(200deg); }
-  70% { transform: translateY(32px) scale(2.55) rotate(330deg); }
-  100% { transform: translateY(28px) scale(2.4) rotate(360deg); }
-}
-
-.globe-fly {
-  animation: globe-fly 0.9s cubic-bezier(0.22, 0.9, 0.32, 1.15) forwards;
+/* Universities page globe: a real Earth behind the hero text. At rest its
+   diameter equals the hero frame's width; picking a country doubles it
+   (--earth-scale: 2) so it spills past the frame. The spin itself is the
+   map rotating (D3 projection), not a CSS rotation. */
+.earth-globe {
+  transform: scale(var(--earth-scale, 1));
+  transition: transform 1.1s cubic-bezier(0.22, 0.9, 0.32, 1.15);
   will-change: transform;
 }
 
-@keyframes globe-settle {
-  from { transform: translateY(28px) scale(2.4) rotate(360deg); }
-  to { transform: translateY(0) scale(1) rotate(0deg); }
+.earth-country {
+  fill: rgba(191, 219, 254, 0.3);
+  stroke: rgba(255, 255, 255, 0.38);
+  stroke-width: 1;
 }
 
-.globe-settle {
-  animation: globe-settle 0.55s ease-out forwards;
-  will-change: transform;
+.earth-country-selected {
+  fill: #f59e0b;
+  stroke: #ffffff;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.9));
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero-stars, .hero-meteor, .live-dot-blink, .globe-wire { animation: none; }
-  .globe-fly { animation: none; transform: translateY(28px) scale(2.4); }
-  .globe-settle { animation: none; transform: none; }
+  .hero-stars, .hero-meteor, .live-dot-blink { animation: none; }
+  .earth-globe { transition: none; }
 }
