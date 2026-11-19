@@ -7,13 +7,12 @@ import { useDropdown } from './use-dropdown'
 import { useLiveStore } from '@/lib/live-store'
 
 /**
- * Profile menu in the header, modelled on the reference panel.
- *
- * Signed out, it shows "Not signed in" with "Continue with Google" and
- * "Email sign-in" — both lead to the site's existing sign-in page (/login).
- * That page is honest about accounts: without Upstash/Auth keys it shows the
- * setup notice, so nothing here pretends a sign-in happened. Google sign-in
- * itself is not wired up — there are no OAuth keys for it.
+ * Sign-up and sign-in sit in the Profile menu in the top-right corner, where
+ * people look for an account button: its panel holds "Continue with Google"
+ * and "Email sign-in". Google goes to /api/auth/google, the real OAuth
+ * start; without GOOGLE_CLIENT_ID it redirects back to /login with an honest
+ * "not configured" message instead of pretending to sign in. Email sign-in
+ * goes to the existing sign-in page (/login).
  *
  * Counts are real: "Favourite roles" is the bookmarked jobs on this device
  * (localStorage); "Saved lists" is the signed-in account's server lists
@@ -120,7 +119,7 @@ export function ProfileMenu({ email }: { email: string | null | undefined }) {
                 </div>
               </div>
               <Link
-                href="/login"
+                href="/api/auth/google"
                 onClick={() => setOpen(false)}
                 className="mt-4 flex h-10 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent/90"
               >

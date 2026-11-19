@@ -12,18 +12,14 @@ import { Logo } from '@/components/logo'
 import { cn } from '@/lib/utils'
 
 /*
- * Section order on this site: Academic Position first, PhD Scholarships,
- * Find a supervisor, Universities worldwide. The header follows that order.
+ * The top nav is deliberately short: the three academic destinations only.
+ * Find a supervisor and Universities stay reachable from the homepage hero
+ * links, and Job alerts live on the industry site — not here.
  */
 const NAV_ITEMS = [
   { href: '/academic-positions', label: 'Academic Position' },
-  { href: '/academic', label: 'PhD Scholarships' },
-  { href: '/supervisors', label: 'Find a supervisor' },
-  { href: '/universities', label: 'Universities' },
+  { href: '/academic', label: 'PhD Position' },
   { href: '/cities', label: 'Browse by City' },
-  { href: '/jobs?visa=1', label: 'Visa Sponsorship' },
-  { href: '/account', label: 'Job alerts' },
-  { href: '/post-a-job', label: 'Post a job' },
 ]
 
 /**
@@ -78,13 +74,14 @@ export function SiteHeader() {
         <Logo />
 
         {/*
-         * Eight links plus two account buttons only fit on one line from 1280px up,
-         * so the nav appears at xl and the hamburger covers everything narrower.
-         * Everything is nowrap: a wrapped label is what made the bar look ragged.
+         * Three nav links plus two account buttons fit on one line from 1280px
+         * up, so the nav appears at xl and the hamburger covers everything
+         * narrower. Everything is nowrap: a wrapped label is what made the
+         * bar look ragged.
          */}
         <nav aria-label="Main" className="hidden items-center gap-0.5 xl:flex">
           {NAV_ITEMS.map((item) => {
-            const active = pathname.startsWith(item.href.split('?')[0]) && item.href !== '/jobs?visa=1'
+            const active = pathname.startsWith(item.href.split('?')[0])
             return (
               <Link
                 key={item.href}

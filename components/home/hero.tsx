@@ -18,11 +18,7 @@ export function Hero({ stats, updatedAt }: HeroProps) {
 
   return (
     <section className="relative isolate overflow-hidden bg-primary text-primary-foreground">
-      <div className="hero-sky absolute inset-0 -z-10 pointer-events-none" aria-hidden="true">
-        <span className="hero-stars" />
-        <span className="hero-meteor" />
-        <span className="hero-meteor hero-meteor-delayed" />
-      </div>
+      <div className="hero-grid absolute inset-0 -z-10 pointer-events-none" aria-hidden="true" />
 
       <div className="mx-auto max-w-7xl px-4 pt-16 pb-14 sm:px-6 md:pt-24 md:pb-20 lg:px-8">
         <p className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-3 py-1 font-mono text-xs tracking-wider text-white/80 uppercase">
@@ -30,11 +26,11 @@ export function Hero({ stats, updatedAt }: HeroProps) {
         </p>
 
         <h1 className="mt-6 max-w-4xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">
-          PhD Scholarship{' '}
-          <span className="text-accent">in Structural Engineering</span>
+          Academic <span className="text-accent">Opportunity</span>
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-pretty text-white/80">
-          Explore fully funded PhD scholarships in structural and civil engineering, and find a supervisor.
+          Explore academic positions and fully funded PhD scholarships in structural and civil
+          engineering, and find a supervisor.
         </p>
 
         <div className="mt-10 max-w-5xl">
